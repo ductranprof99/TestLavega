@@ -14,6 +14,12 @@ struct UserInfoView: View {
     var body: some View {
         VStack(spacing: 16) {
             Spacer()
+                .frame(height: 30)
+            
+            Text("User Info")
+                .font(.largeTitle)
+                .foregroundStyle(Color.black)
+            
             if let url = user.picture {
                 AsyncImage(url: url) { img in
                     img.resizable().scaledToFill()
@@ -28,9 +34,18 @@ struct UserInfoView: View {
             Text(user.email).foregroundStyle(.secondary)
 
             Button(role: .destructive, action: onLogout) {
-                Text("Logout").bold()
+                HStack(spacing: 12) {
+                    Text("Sign Out").bold()
+                        .foregroundStyle(Color.white)
+                }
+                .padding()
+                .frame(maxWidth: .infinity)
+                .background(Color.blue)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
             }
             .padding(.top, 12)
+            .padding(.horizontal, 30)
+            
             Spacer()
         }
         .padding()

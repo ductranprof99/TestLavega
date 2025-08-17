@@ -28,15 +28,28 @@ final class AuthManager: NSObject, ObservableObject {
     private var currentState = ""
     private var codeVerifier = ""
     private var session: ASWebAuthenticationSession?
-    private let accountKey = "google.oauth.state"
-    private let urlSession = URLSession(configuration: .default)
+
+    // Injected seams
+    private let store: AuthStore
+    private let http: HTTPClient
+    private let now: () -> Date
+
+    init(
+        store: AuthStore = KeychainAuthStore(accountKey: "google.oauth.state"),
+        http: HTTPClient = URLSessionHTTPClient(),
+        now: @escaping () -> Date = Date.init
+    ) {
+        self.store = store
+        self.http = http
+        self.now = now
+        super.init()
+    }
 
     // MARK: - Public API
     func restoreSession() {
         Task {
             do {
-                if let data = try KeychainHelper.load(account: accountKey) {
-                    let state = try JSONDecoder().decode(AuthState.self, from: data)
+                if let state = try store.load() {
                     self.authState = state
                     try await ensureValidToken()
                     try await fetchUserInfo()
@@ -89,7 +102,7 @@ final class AuthManager: NSObject, ObservableObject {
     }
 
     func logout() {
-        KeychainHelper.delete(account: accountKey)
+        try? store.save(nil)
         authState = nil
         user = nil
     }
@@ -152,15 +165,15 @@ final class AuthManager: NSObject, ObservableObject {
         ]
         req.httpBody = body.percentFormEncoded().data(using: .utf8)
 
-        let (data, resp) = try await urlSession.data(for: req)
-        guard let http = resp as? HTTPURLResponse else { throw URLError(.badServerResponse) }
-        guard (200..<300).contains(http.statusCode) else {
+        let (data, resp) = try await http.data(for: req)
+        guard let httpResp = resp as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        guard (200..<300).contains(httpResp.statusCode) else {
             let errText = String(data: data, encoding: .utf8) ?? "Unknown"
-            throw NSError(domain: "TokenExchange", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: errText])
+            throw NSError(domain: "TokenExchange", code: httpResp.statusCode, userInfo: [NSLocalizedDescriptionKey: errText])
         }
 
         let token = try JSONDecoder().decode(TokenResponse.self, from: data)
-        let expiry = Date().addingTimeInterval(TimeInterval(token.expires_in))
+        let expiry = now().addingTimeInterval(TimeInterval(token.expires_in))
         self.authState = AuthState(
             accessToken: token.access_token,
             expiryDate: expiry,
@@ -170,7 +183,7 @@ final class AuthManager: NSObject, ObservableObject {
 
     private func ensureValidToken() async throws {
         guard var state = self.authState else { return }
-        if state.expiryDate > Date().addingTimeInterval(60) { return } // still valid
+        if state.expiryDate > now().addingTimeInterval(60) { return } // still valid
 
         guard let refresh = state.refreshToken else {
             throw URLError(.userAuthenticationRequired)
@@ -187,14 +200,14 @@ final class AuthManager: NSObject, ObservableObject {
         ]
         req.httpBody = body.percentFormEncoded().data(using: .utf8)
 
-        let (data, resp) = try await urlSession.data(for: req)
-        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        let (data, resp) = try await http.data(for: req)
+        guard let httpResp = resp as? HTTPURLResponse, (200..<300).contains(httpResp.statusCode) else {
             throw URLError(.userAuthenticationRequired)
         }
         let token = try JSONDecoder().decode(TokenResponse.self, from: data)
         state = AuthState(
             accessToken: token.access_token,
-            expiryDate: Date().addingTimeInterval(TimeInterval(token.expires_in)),
+            expiryDate: now().addingTimeInterval(TimeInterval(token.expires_in)),
             refreshToken: state.refreshToken ?? token.refresh_token
         )
         self.authState = state
@@ -206,15 +219,15 @@ final class AuthManager: NSObject, ObservableObject {
 
         var req = URLRequest(url: GoogleOAuthConfig.userInfoURL)
         req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let (data, resp) = try await urlSession.data(for: req)
+        let (data, resp) = try await http.data(for: req)
 
-        guard let http = resp as? HTTPURLResponse else { throw URLError(.badServerResponse) }
-        if http.statusCode == 401 { // try refresh once
+        guard let httpResp = resp as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        if httpResp.statusCode == 401 { // try refresh once
             self.authState?.expiryDate = .distantPast
             try await ensureValidToken()
             return try await fetchUserInfo()
         }
-        guard (200..<300).contains(http.statusCode) else {
+        guard (200..<300).contains(httpResp.statusCode) else {
             throw URLError(.cannotParseResponse)
         }
 
@@ -229,12 +242,7 @@ final class AuthManager: NSObject, ObservableObject {
 
     private func saveAuthState() {
         do {
-            if let state = authState {
-                let data = try JSONEncoder().encode(state)
-                try KeychainHelper.save(data, account: accountKey)
-            } else {
-                KeychainHelper.delete(account: accountKey)
-            }
+            try store.save(authState)
         } catch {
             self.errorMessage = "Keychain error: \(error.localizedDescription)"
         }

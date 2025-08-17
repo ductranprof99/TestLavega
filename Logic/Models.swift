@@ -27,4 +27,6 @@ struct UserProfile: Codable, Equatable {
     let name: String
     let email: String
     let picture: URL?
+    
+    static let mockUser = UserProfile(name: "Test User", email: "test@example.com", picture: nil)
 }

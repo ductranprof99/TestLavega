@@ -15,22 +15,20 @@ struct LoginView: View {
     var body: some View {
         VStack(spacing: 24) {
             Spacer()
-            Text("Welcome").font(.largeTitle).bold()
-
             if isLoading { ProgressView().scaleEffect(1.2) }
 
             Button(action: onLogin) {
                 HStack(spacing: 12) {
-                    Image(systemName: "globe")
                     Text("Login with Google").bold()
+                        .foregroundStyle(Color.white)
                 }
                 .padding()
                 .frame(maxWidth: .infinity)
-                .background(Color.blue.opacity(0.15))
+                .background(Color.blue)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
             }
             .disabled(isLoading)
-            .padding(.horizontal)
+            .padding(.horizontal, 50)
 
             if let error = error {
                 Text(error).foregroundColor(.red).font(.footnote).multilineTextAlignment(.center).padding(.horizontal)
